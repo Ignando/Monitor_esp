@@ -1,7 +1,8 @@
-from machine import ADC, Pin, I2S
+from machine import ADC, Pin, I2S, reset_cause, DEEPSLEEP_RESET
 import time
 import math
 import network
+import esp32
 from umqtt.simple import MQTTClient
 import ujson 
 import struct
@@ -15,11 +16,7 @@ if wlan is None:
         pass
 print("Connected to WiFi:", wlan.ifconfig())
 
-
-
 # ========== CONFIG ==========
-
-
 MQTT_BROKER = "datum.cedalo.cloud"
 MQTT_PORT = 8883
 CLIENT_ID = b"EDGE"
@@ -30,7 +27,6 @@ TOPIC = b"device/property/monitor"
 PROPERTY_ID = "APT001"
 COMPLEX_ID = "1"
 wlan = network.WLAN(network.STA_IF)
-
 
 # ========== GAS SENSOR SETUP ==========
 MQ_PIN = 34
@@ -60,12 +56,27 @@ SD_PIN = 32
 I2S_ID = 0
 BUFFER_LEN = 1024
 
+RESET_BUTTON_PIN = 27
+reset_button = Pin(RESET_BUTTON_PIN, Pin.IN, Pin.PULL_UP)
+
+
 PANIC_BUTTON_PIN = 12
 panic_button = Pin(PANIC_BUTTON_PIN, Pin.IN, Pin.PULL_UP)
 
+esp32.wake_on_ext0(pin=panic_button, level=esp32.WAKEUP_ALL_LOW)  # Wake on LOW (button press)
+SLEEP_MS = 60000  # 1 min
 
 # === CALIBRATION OFFSET ===
 CALIBRATION_OFFSET = 110.8  # Based on 70 dB SPL = -39.8 dBFS
+
+# === STICKY EVENT SETTINGS ===
+MOTION_STICKY_SECONDS = 10     # Motion latches for 10s after last detected
+SMOKE_STICKY_SECONDS = 30      # Smoke latches for 30s after last detected
+SMOKE_THRESHOLD = 600          # Adjust this value for your sensor/environment
+
+last_motion_time = 0
+last_smoke_time = 0
+panic_active = False
 
 # === SETUP I2S ===
 audio_in = I2S(
@@ -83,27 +94,14 @@ audio_in = I2S(
 def calculate_decibels():
     audio_samples = bytearray(BUFFER_LEN * 2)
     num_bytes_read = audio_in.readinto(audio_samples)
-
     if num_bytes_read <= 0:
-        return None, None
-
-    # Unpack bytearray into signed 16-bit integers
+        return None
     samples = struct.unpack("<{}h".format(BUFFER_LEN), audio_samples)
-
-    # Calculate RMS
     sum_squares = sum(sample ** 2 for sample in samples)
     rms = math.sqrt(sum_squares / len(samples))
-
-    if rms == 0:
-        dbfs = -100.0
-    else:
-        dbfs = 20 * math.log10(rms / 32768)
-
+    dbfs = 20 * math.log10(rms / 32768) if rms > 0 else -100.0
     dbspl = dbfs + CALIBRATION_OFFSET
     return dbspl
-
-
-# ========== FUNCTIONS ==========
 
 def MQResistanceCalculation(raw_adc):
     if raw_adc == 0:
@@ -181,9 +179,9 @@ def publish_data(lpg, co, smoke, motion, sound, panic):
         },
         "motion_detected": bool(motion),
         "wifi_strength": wifi_strength,
-        "sound_level" : sound,
+        "sound_level": sound,
         "panic": panic  
-})
+    })
     try:
         client.publish(TOPIC, payload)
         print("Published:", payload)
@@ -193,30 +191,70 @@ def publish_data(lpg, co, smoke, motion, sound, panic):
         return False
 
 # === MAIN ===
-
-
 while not connect_and_subscribe():
     time.sleep(5)
 
 Ro = MQCalibration()
 
 while True:
-    # Sensor readings
+    now = time.time()
+
+    reason = machine.wake_reason()
+    if reason == machine.EXT0_WAKE:
+        print("Woke from PANIC button!")
+        # Publish panic payload here
+    elif reason == machine.TIMER_WAKE:
+        print("Woke from timer.")
+        # Normal data publish here
+    else:
+        print("Woke from other reason:", reason)
+
+    # --- Panic Button ---
+    if panic_button.value() == 0:   # LOW means pressed
+        print("PANIC!!!!!!!!!!!!!")
+        panic_active = True         # Latches ON, won't auto-reset
+
+        # --- IMMEDIATE PANIC PAYLOAD ---
+        lpg, co, smoke = 0, 0, 0    # (optionally, re-read sensors here)
+        sound = calculate_decibels()
+        motion_sticky = (now - last_motion_time) < MOTION_STICKY_SECONDS
+
+        if not publish_data(lpg, co, smoke, motion_sticky, sound, panic_active):
+            while not connect_and_subscribe():
+                time.sleep(2)
+            publish_data(lpg, co, smoke, motion_sticky, sound, panic_active)
+        continue  # Immediately check buttons again (no 60s wait)
+
+    # --- Motion (PIR) ---
+    if pir.value():
+        last_motion_time = now
+    motion_sticky = (now - last_motion_time) < MOTION_STICKY_SECONDS
+
+    # --- Gas/Smoke ---
     rs = MQRead()
     rs_ro_ratio = rs / Ro if Ro else 0
     lpg = MQGetGasPercentage(rs_ro_ratio, 0)
     co = MQGetGasPercentage(rs_ro_ratio, 1)
     smoke = MQGetGasPercentage(rs_ro_ratio, 2)
-    motion = pir.value()
+
+    if smoke > SMOKE_THRESHOLD:
+        last_smoke_time = now
+    smoke_sticky = (now - last_smoke_time) < SMOKE_STICKY_SECONDS
+
+    # --- Sound ---
     sound = calculate_decibels()
-    panic = panic_button.value() == 0  # True if pressed (LOW)
 
+    # RESET BUTTON
+    if reset_button.value() == 0:  # Button pressed (LOW)
+        print("Reset button pressed! Clearing latches.")
+        panic_active = False
+        last_motion_time = 0
+        last_smoke_time = 0
 
-
-
-    # Publish to MQTT, reconnect if needed
-    if not publish_data(lpg, co, smoke, motion, sound, panic):
+    # --- Publish (Normal Periodic) ---
+    if not publish_data(lpg, co, smoke, motion_sticky, sound, panic_active):
         while not connect_and_subscribe():
             time.sleep(5)
 
-    time.sleep(60)  # send data once per minute (adjust for testing)
+    print("Going to deep sleep...")
+    machine.deepsleep(SLEEP_MS)
