@@ -1,4 +1,4 @@
-from machine import ADC, Pin, I2S, reset_cause, DEEPSLEEP_RESET
+from machine import ADC, Pin, I2S
 import time
 import math
 import network
@@ -60,10 +60,9 @@ RESET_BUTTON_PIN = 27
 reset_button = Pin(RESET_BUTTON_PIN, Pin.IN, Pin.PULL_UP)
 
 
-PANIC_BUTTON_PIN = 12
+PANIC_BUTTON_PIN = 13
 panic_button = Pin(PANIC_BUTTON_PIN, Pin.IN, Pin.PULL_UP)
 
-esp32.wake_on_ext0(pin=panic_button, level=esp32.WAKEUP_ALL_LOW)  # Wake on LOW (button press)
 SLEEP_MS = 60000  # 1 min
 
 # === CALIBRATION OFFSET ===
@@ -73,6 +72,8 @@ CALIBRATION_OFFSET = 110.8  # Based on 70 dB SPL = -39.8 dBFS
 MOTION_STICKY_SECONDS = 10     # Motion latches for 10s after last detected
 SMOKE_STICKY_SECONDS = 30      # Smoke latches for 30s after last detected
 SMOKE_THRESHOLD = 600          # Adjust this value for your sensor/environment
+
+
 
 last_motion_time = 0
 last_smoke_time = 0
@@ -90,6 +91,14 @@ audio_in = I2S(
     rate=16000,
     ibuf=BUFFER_LEN * 2
 )
+
+def mqtt_status(msg):
+    try:
+        client.publish("device/property/status", msg)
+        print("Status sent:", msg)
+    except Exception as e:
+        print("Failed to send status:", e)
+
 
 def calculate_decibels():
     audio_samples = bytearray(BUFFER_LEN * 2)
@@ -111,6 +120,7 @@ def MQResistanceCalculation(raw_adc):
 def MQCalibration():
     val = 0.0
     print("Calibrating MQ-2...")
+    mqtt_status("Calibarting MQ-2...")
     for _ in range(CALIBRATION_SAMPLE_TIMES):
         val += MQResistanceCalculation(adc.read())
         time.sleep(CALIBRATION_SAMPLE_INTERVAL)
@@ -189,6 +199,14 @@ def publish_data(lpg, co, smoke, motion, sound, panic):
     except Exception as e:
         print("Publish failed, reconnecting...", str(e))
         return False
+    
+
+prev_lpg = prev_co = prev_smoke = prev_sound = None
+prev_motion = False
+prev_panic = False
+
+SOUND_CHANGE_THRESHOLD = 5.0    # dB difference
+GAS_CHANGE_THRESHOLD = 50.0     # Percent difference (can adjust)
 
 # === MAIN ===
 while not connect_and_subscribe():
@@ -199,31 +217,10 @@ Ro = MQCalibration()
 while True:
     now = time.time()
 
-    reason = machine.wake_reason()
-    if reason == machine.EXT0_WAKE:
-        print("Woke from PANIC button!")
-        # Publish panic payload here
-    elif reason == machine.TIMER_WAKE:
-        print("Woke from timer.")
-        # Normal data publish here
-    else:
-        print("Woke from other reason:", reason)
-
     # --- Panic Button ---
     if panic_button.value() == 0:   # LOW means pressed
         print("PANIC!!!!!!!!!!!!!")
-        panic_active = True         # Latches ON, won't auto-reset
-
-        # --- IMMEDIATE PANIC PAYLOAD ---
-        lpg, co, smoke = 0, 0, 0    # (optionally, re-read sensors here)
-        sound = calculate_decibels()
-        motion_sticky = (now - last_motion_time) < MOTION_STICKY_SECONDS
-
-        if not publish_data(lpg, co, smoke, motion_sticky, sound, panic_active):
-            while not connect_and_subscribe():
-                time.sleep(2)
-            publish_data(lpg, co, smoke, motion_sticky, sound, panic_active)
-        continue  # Immediately check buttons again (no 60s wait)
+        panic_active = True
 
     # --- Motion (PIR) ---
     if pir.value():
@@ -244,17 +241,49 @@ while True:
     # --- Sound ---
     sound = calculate_decibels()
 
-    # RESET BUTTON
-    if reset_button.value() == 0:  # Button pressed (LOW)
+    # --- RESET Button ---
+    if reset_button.value() == 0:
         print("Reset button pressed! Clearing latches.")
         panic_active = False
         last_motion_time = 0
         last_smoke_time = 0
 
-    # --- Publish (Normal Periodic) ---
-    if not publish_data(lpg, co, smoke, motion_sticky, sound, panic_active):
-        while not connect_and_subscribe():
-            time.sleep(5)
+    # --- Detect Significant Changes ---
+    should_send = False
 
-    print("Going to deep sleep...")
-    machine.deepsleep(SLEEP_MS)
+    if prev_lpg is None:  # First loop
+        should_send = True
+    else:
+        if abs(lpg - prev_lpg) > GAS_CHANGE_THRESHOLD:
+            should_send = True
+        elif abs(co - prev_co) > GAS_CHANGE_THRESHOLD:
+            should_send = True
+        elif abs(smoke - prev_smoke) > GAS_CHANGE_THRESHOLD:
+            should_send = True
+        elif abs(sound - prev_sound) > SOUND_CHANGE_THRESHOLD:
+            should_send = True
+        elif motion_sticky != prev_motion:
+            should_send = True
+        elif panic_active != prev_panic:
+            should_send = True
+
+    if should_send:
+        print("Significant change detected. Sending data...")
+        if not publish_data(lpg, co, smoke, motion_sticky, sound, panic_active):
+            while not connect_and_subscribe():
+                time.sleep(5)
+            publish_data(lpg, co, smoke, motion_sticky, sound, panic_active)
+
+        mqtt_status("Payload sent")
+
+        prev_lpg = lpg
+        prev_co = co
+        prev_smoke = smoke
+        prev_sound = sound
+        prev_motion = motion_sticky
+        prev_panic = panic_active
+    else:
+        print("No significant change. Skipping publish.")
+
+    time.sleep(5)  # Short delay before next check
+
