@@ -17,6 +17,10 @@ pir = Pin(PIR_PIN, Pin.IN)
 PANIC_PIN = 13
 panic_button = Pin(PANIC_PIN, Pin.IN, Pin.PULL_UP)
 
+# === Reset Button ===
+RESET_PIN = 4
+reset_button = Pin(RESET_PIN, Pin.IN, Pin.PULL_UP)  # Pin 4, adjust as needed
+
 # === I2S MEMS Microphone ===
 SCK_PIN = 14
 WS_PIN = 15
@@ -49,8 +53,10 @@ def calculate_decibels():
     dbspl = dbfs + CALIBRATION_OFFSET
     return dbspl
 
-print("=== Motion, MQ-2, Mic, and Panic Button Test ===")
-print("Wave your hand for motion, blow on MQ-2, make noise, or press the panic button.\n")
+panic_active = False  # <--- Latches when panic is pressed, reset clears it
+
+print("=== Motion, MQ-2, Mic, Panic, and Reset Button Test ===")
+print("Wave your hand for motion, blow on MQ-2, make noise, or press the panic button.\nPress RESET (Pin 4) to clear panic state.\n")
 
 while True:
     # PIR Motion
@@ -65,9 +71,15 @@ while True:
     sound = calculate_decibels()
     print("Sound Level (dB SPL):", round(sound, 2) if sound is not None else "N/A", end=' | ')
     
-    # Panic Button
+    # Panic Button latch logic
     if panic_button.value() == 0:
-        print("PANIC BUTTON PRESSED!", end='')
+        panic_active = True
+
+    if reset_button.value() == 0:
+        panic_active = False
+        print("RESET BUTTON PRESSED! Panic cleared.", end=' | ')
+
+    print("PANIC:", "ACTIVE" if panic_active else "Not active", end='')
 
     print()  # New line
     time.sleep(1)

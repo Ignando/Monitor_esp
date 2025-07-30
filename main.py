@@ -24,9 +24,8 @@ USERNAME = b"EdgePrototypeDevice01"
 PASSWORD = b"s9HR6VIdn1Rh6dh5fF"
 TOPIC = b"device/property/monitor"
 
-PROPERTY_ID = "APT001"
-COMPLEX_ID = "1"
-wlan = network.WLAN(network.STA_IF)
+PROPERTY_ID = "City Central II"
+COMPLEX_ID = "EastWEST"
 
 # ========== GAS SENSOR SETUP ==========
 MQ_PIN = 34
@@ -56,28 +55,16 @@ SD_PIN = 32
 I2S_ID = 0
 BUFFER_LEN = 1024
 
-RESET_BUTTON_PIN = 27
+RESET_BUTTON_PIN = 4
 reset_button = Pin(RESET_BUTTON_PIN, Pin.IN, Pin.PULL_UP)
-
-
 PANIC_BUTTON_PIN = 13
 panic_button = Pin(PANIC_BUTTON_PIN, Pin.IN, Pin.PULL_UP)
 
-SLEEP_MS = 60000  # 1 min
+REPORT_INTERVAL = 600  # 10 min in seconds
+PANIC_DEBOUNCE = 2     # seconds after panic event
 
 # === CALIBRATION OFFSET ===
 CALIBRATION_OFFSET = 110.8  # Based on 70 dB SPL = -39.8 dBFS
-
-# === STICKY EVENT SETTINGS ===
-MOTION_STICKY_SECONDS = 10     # Motion latches for 10s after last detected
-SMOKE_STICKY_SECONDS = 30      # Smoke latches for 30s after last detected
-SMOKE_THRESHOLD = 600          # Adjust this value for your sensor/environment
-
-
-
-last_motion_time = 0
-last_smoke_time = 0
-panic_active = False
 
 # === SETUP I2S ===
 audio_in = I2S(
@@ -91,14 +78,6 @@ audio_in = I2S(
     rate=16000,
     ibuf=BUFFER_LEN * 2
 )
-
-def mqtt_status(msg):
-    try:
-        client.publish("device/property/status", msg)
-        print("Status sent:", msg)
-    except Exception as e:
-        print("Failed to send status:", e)
-
 
 def calculate_decibels():
     audio_samples = bytearray(BUFFER_LEN * 2)
@@ -120,7 +99,6 @@ def MQResistanceCalculation(raw_adc):
 def MQCalibration():
     val = 0.0
     print("Calibrating MQ-2...")
-    mqtt_status("Calibarting MQ-2...")
     for _ in range(CALIBRATION_SAMPLE_TIMES):
         val += MQResistanceCalculation(adc.read())
         time.sleep(CALIBRATION_SAMPLE_INTERVAL)
@@ -199,91 +177,55 @@ def publish_data(lpg, co, smoke, motion, sound, panic):
     except Exception as e:
         print("Publish failed, reconnecting...", str(e))
         return False
-    
 
-prev_lpg = prev_co = prev_smoke = prev_sound = None
-prev_motion = False
-prev_panic = False
-
-SOUND_CHANGE_THRESHOLD = 5.0    # dB difference
-GAS_CHANGE_THRESHOLD = 50.0     # Percent difference (can adjust)
-
-# === MAIN ===
 while not connect_and_subscribe():
     time.sleep(5)
 
 Ro = MQCalibration()
 
+panic_active = False
+
 while True:
-    now = time.time()
-
-    # --- Panic Button ---
-    if panic_button.value() == 0:   # LOW means pressed
-        print("PANIC!!!!!!!!!!!!!")
-        panic_active = True
-
-    # --- Motion (PIR) ---
-    if pir.value():
-        last_motion_time = now
-    motion_sticky = (now - last_motion_time) < MOTION_STICKY_SECONDS
-
-    # --- Gas/Smoke ---
+    # --- Normal report ---
     rs = MQRead()
     rs_ro_ratio = rs / Ro if Ro else 0
     lpg = MQGetGasPercentage(rs_ro_ratio, 0)
     co = MQGetGasPercentage(rs_ro_ratio, 1)
     smoke = MQGetGasPercentage(rs_ro_ratio, 2)
-
-    if smoke > SMOKE_THRESHOLD:
-        last_smoke_time = now
-    smoke_sticky = (now - last_smoke_time) < SMOKE_STICKY_SECONDS
-
-    # --- Sound ---
     sound = calculate_decibels()
+    motion = pir.value()
 
-    # --- RESET Button ---
+    # Handle RESET first (so you can clear panic before publishing!)
     if reset_button.value() == 0:
-        print("Reset button pressed! Clearing latches.")
-        panic_active = False
-        last_motion_time = 0
-        last_smoke_time = 0
+        if panic_active:
+            print("Reset button pressed! Clearing panic state.")
+            panic_active = False
+            publish_data(lpg, co, smoke, motion, sound, False)
+            # Add a small debounce delay
+            time.sleep(0.5)
 
-    # --- Detect Significant Changes ---
-    should_send = False
+    # Send the normal payload
+    publish_data(lpg, co, smoke, motion, sound, panic_active)
+    print("Normal data sent. Waiting for next interval or panic.")
 
-    if prev_lpg is None:  # First loop
-        should_send = True
-    else:
-        if abs(lpg - prev_lpg) > GAS_CHANGE_THRESHOLD:
-            should_send = True
-        elif abs(co - prev_co) > GAS_CHANGE_THRESHOLD:
-            should_send = True
-        elif abs(smoke - prev_smoke) > GAS_CHANGE_THRESHOLD:
-            should_send = True
-        elif abs(sound - prev_sound) > SOUND_CHANGE_THRESHOLD:
-            should_send = True
-        elif motion_sticky != prev_motion:
-            should_send = True
-        elif panic_active != prev_panic:
-            should_send = True
-
-    if should_send:
-        print("Significant change detected. Sending data...")
-        if not publish_data(lpg, co, smoke, motion_sticky, sound, panic_active):
-            while not connect_and_subscribe():
-                time.sleep(5)
-            publish_data(lpg, co, smoke, motion_sticky, sound, panic_active)
-
-        mqtt_status("Payload sent")
-
-        prev_lpg = lpg
-        prev_co = co
-        prev_smoke = smoke
-        prev_sound = sound
-        prev_motion = motion_sticky
-        prev_panic = panic_active
-    else:
-        print("No significant change. Skipping publish.")
-
-    time.sleep(5)  # Short delay before next check
+    # --- Wait for panic or interval ---
+    waited = 0
+    while waited < REPORT_INTERVAL:
+        if panic_button.value() == 0:  # Button pressed
+            if not panic_active:
+                print("PANIC BUTTON PRESSED! Sending instant panic event!")
+                panic_active = True
+                publish_data(lpg, co, smoke, motion, sound, True)
+                time.sleep(PANIC_DEBOUNCE)
+            waited += PANIC_DEBOUNCE
+        elif reset_button.value() == 0:
+            if panic_active:
+                print("Reset button pressed! Clearing panic state.")
+                panic_active = False
+                publish_data(lpg, co, smoke, motion, sound, False)
+                time.sleep(0.5)
+            waited += 0.5
+        else:
+            time.sleep(0.2)
+            waited += 0.2
 
