@@ -210,7 +210,8 @@ Ro = MQCalibration()
 panic_active = False
 
 while True:
-    print("Updated 1.0.11")
+    client.publish("device/property/update_notice", "OTA update to version 1.12 successful")
+    print("Updated 1.0.12")
     # --- Normal report ---
     rs = MQRead()
     rs_ro_ratio = rs / Ro if Ro else 0
