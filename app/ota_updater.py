@@ -143,38 +143,46 @@ class OTAUpdater:
         print('Version {} downloaded to {}'.format(version, self.modulepath(self.new_version_dir)))
 
     def _download_all_files(self, version, sub_dir=''):
-        url = 'https://api.github.com/repos/{}/contents{}{}{}?ref=refs/tags/{}'.format(self.github_repo, self.github_src_dir, self.main_dir, sub_dir, version)
-        gc.collect() 
-        file_list = self.http_client.get(url)
-        file_list_json = file_list.json()
+        import ujson
 
+        # Build the GitHub content URL
+        joined_path = '/'.join(filter(None, [self.github_src_dir.rstrip('/'), self.main_dir.strip('/'), sub_dir.strip('/')]))
+        url = f'https://api.github.com/repos/{self.github_repo}/contents/{joined_path}?ref=refs/tags/{version}'
+        gc.collect()
+
+        # Perform the HTTP GET request
+        response = self.http_client.get(url)
+
+        # Parse the JSON manually to avoid unsupported stream operations
         try:
-            file_list_json = file_list.json()
+            file_list_json = ujson.loads(response.content.decode('utf-8'))
         except Exception as e:
             print("Failed to parse JSON from:", url)
-            print("Raw response:", file_list.read())
+            print("Raw response:", response.content)
             raise e
-        
-        file_list_json = file_list.json()
 
+        # Sanity check
         if not isinstance(file_list_json, list):
             print("GitHub API error response:", file_list_json)
             raise ValueError("Expected a list from GitHub, got something else.")
 
-    
+        # Process each file/directory
         for file in file_list_json:
-            path = self.modulepath(self.new_version_dir + '/' + file['path'].replace(self.main_dir + '/', '').replace(self.github_src_dir, ''))
+            relative_path = file['path'].replace(self.main_dir + '/', '').replace(self.github_src_dir, '')
+            path = self.modulepath(self.new_version_dir + '/' + relative_path)
             if file['type'] == 'file':
                 gitPath = file['path']
-                print('\tDownloading: ', gitPath, 'to', path)
+                print('\tDownloading:', gitPath, 'to', path)
                 self._download_file(version, gitPath, path)
             elif file['type'] == 'dir':
-                print('Creating dir', path)
+                print('Creating dir:', path)
                 self.mkdir(path)
                 self._download_all_files(version, sub_dir + '/' + file['name'])
+
             gc.collect()
 
-        file_list.close()
+        response.close()
+
 
     def _download_file(self, version, gitPath, path):
         self.http_client.get('https://raw.githubusercontent.com/{}/{}/{}'.format(self.github_repo, version, gitPath), saveToFile=path)

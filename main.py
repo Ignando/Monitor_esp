@@ -16,4 +16,4 @@ def download_and_install_update_if_available():
 
 download_and_install_update_if_available()
 
-import app.main  # or app.main_app if you renamed it
+import app.main 
