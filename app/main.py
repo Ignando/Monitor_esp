@@ -210,7 +210,7 @@ Ro = MQCalibration()
 panic_active = False
 
 while True:
-    print("Updated 1.0.9")
+    print("Updated 1.0.10")
     # --- Normal report ---
     rs = MQRead()
     rs_ro_ratio = rs / Ro if Ro else 0
