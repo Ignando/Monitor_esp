@@ -154,6 +154,13 @@ class OTAUpdater:
             print("Failed to parse JSON from:", url)
             print("Raw response:", file_list.read())
             raise e
+        
+        file_list_json = file_list.json()
+
+        if not isinstance(file_list_json, list):
+            print("GitHub API error response:", file_list_json)
+            raise ValueError("Expected a list from GitHub, got something else.")
+
     
         for file in file_list_json:
             path = self.modulepath(self.new_version_dir + '/' + file['path'].replace(self.main_dir + '/', '').replace(self.github_src_dir, ''))
