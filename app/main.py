@@ -6,7 +6,7 @@ import esp32
 from umqtt.simple import MQTTClient
 import ujson 
 import struct
-import app.config as config
+import config
 from app.ota_updater import OTAUpdater
 from __main__ import wlan
 
