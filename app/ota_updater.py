@@ -147,6 +147,14 @@ class OTAUpdater:
         gc.collect() 
         file_list = self.http_client.get(url)
         file_list_json = file_list.json()
+
+        try:
+            file_list_json = file_list.json()
+        except Exception as e:
+            print("Failed to parse JSON from:", url)
+            print("Raw response:", file_list.read())
+            raise e
+    
         for file in file_list_json:
             path = self.modulepath(self.new_version_dir + '/' + file['path'].replace(self.main_dir + '/', '').replace(self.github_src_dir, ''))
             if file['type'] == 'file':
