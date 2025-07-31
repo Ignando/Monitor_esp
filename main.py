@@ -11,7 +11,7 @@ print("Connected to WiFi:", wlan.ifconfig())
 
 def download_and_install_update_if_available():
     o = OTAUpdater('https://github.com/Ignando/Monitor_esp',
-                   main_dir='app', module='')  # note: app = folder name
+                   main_dir='app', module='',secrets_file='config.py')  # note: app = folder name
     o.install_update_if_available()
 
 download_and_install_update_if_available()
