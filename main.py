@@ -6,6 +6,8 @@ import esp32
 from umqtt.simple import MQTTClient
 import ujson 
 import struct
+import config
+from ota_updater import OTAUpdater
 
 import wifimgr
 
@@ -17,12 +19,12 @@ if wlan is None:
 print("Connected to WiFi:", wlan.ifconfig())
 
 # ========== CONFIG ==========
-MQTT_BROKER = "datum.cedalo.cloud"
-MQTT_PORT = 8883
-CLIENT_ID = b"EDGE"
-USERNAME = b"EdgePrototypeDevice01"
-PASSWORD = b"s9HR6VIdn1Rh6dh5fF"
-TOPIC = b"device/property/monitor"
+MQTT_BROKER = config.MQTT_BROKER
+MQTT_PORT = config.MQTT_PORT
+CLIENT_ID = config.CLIENT_ID
+USERNAME = config.USERNAME
+PASSWORD = config.PASSWORD
+TOPIC = config.TOPIC
 
 PROPERTY_ID = "City Central II"
 COMPLEX_ID = "EastWEST"
@@ -65,6 +67,14 @@ PANIC_DEBOUNCE = 2     # seconds after panic event
 
 # === CALIBRATION OFFSET ===
 CALIBRATION_OFFSET = 110.8  # Based on 70 dB SPL = -39.8 dBFS
+
+def download_and_install_update_if_available():
+    o = OTAUpdater('https://github.com/Ignando/Monitor_esp')
+    o.install_update_if_available()
+
+
+download_and_install_update_if_available()
+
 
 # === SETUP I2S ===
 audio_in = I2S(
