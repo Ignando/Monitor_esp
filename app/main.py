@@ -1,4 +1,5 @@
 from machine import ADC, Pin, I2S
+import os
 import time
 import math
 import network
@@ -6,7 +7,7 @@ import esp32
 from umqtt.simple import MQTTClient
 import ujson 
 import struct
-import config
+from app import config
 from app.ota_updater import OTAUpdater
 from __main__ import wlan
 
