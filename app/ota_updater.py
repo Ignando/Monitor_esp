@@ -209,6 +209,15 @@ class OTAUpdater:
             self._rmtree(self.modulepath(self.new_version_dir))
         print('Update installed, please reboot now')
 
+    def _after_successful_update(self):
+        print("Update installed, please reboot now")
+        try:
+            with open("/update_done.flag", "w") as f:
+                f.write(self.latest_version)
+        except Exception as e:
+            print("Could not write update flag:", e)
+
+
     def _rmtree(self, directory):
         for entry in os.ilistdir(directory):
             is_dir = entry[1] == 0x4000

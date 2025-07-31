@@ -130,6 +130,7 @@ def MQGetGasPercentage(rs_ro_ratio, gas_id):
         return 0
     
 def mqtt_callback(topic, msg):
+    import machine
     print("MQTT message received:", topic, msg)
     if topic == b'device/property/reboot' and msg == b'1':
         print("Remote reboot requested!")
@@ -149,6 +150,18 @@ def connect_and_subscribe():
     except Exception as e:
         print("Failed to connect to MQTT broker. Retrying...", str(e))
         return False
+    
+def check_update_notice():
+    try:
+        if "update_done.flag" in os.listdir("/"):
+            with open("update_done.flag") as f:
+                version = f.read().strip()
+            client.publish(b"device/property/update_notice", b"OTA update to version %s successful" % version.encode())
+            print("Published OTA update notice")
+            os.remove("update_done.flag")
+    except Exception as e:
+        print("Failed to publish OTA update notice:", e)
+
 
 
 def rssi_to_percent(rssi):
@@ -189,6 +202,8 @@ def publish_data(lpg, co, smoke, motion, sound, panic):
 while not connect_and_subscribe():
     time.sleep(5)
 
+check_update_notice()
+
 Ro = MQCalibration()
 
 panic_active = False
@@ -225,7 +240,7 @@ while True:
     # --- Wait for panic or interval ---
     waited = 0
     while waited < REPORT_INTERVAL:
-        
+
         try:
             client.check_msg()  # check for remote messages while waiting
         except Exception as e:
