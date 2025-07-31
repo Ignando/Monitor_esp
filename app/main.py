@@ -8,6 +8,8 @@ import ujson
 import struct
 import app.config as config
 from app.ota_updater import OTAUpdater
+from __main__ import wlan
+
 
 import app.wifimgr as wifimgr
 
