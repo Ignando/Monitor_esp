@@ -128,19 +128,29 @@ def MQGetGasPercentage(rs_ro_ratio, gas_id):
         return MQGetPercentage(rs_ro_ratio, SmokeCurve)
     else:
         return 0
+    
+def mqtt_callback(topic, msg):
+    print("MQTT message received:", topic, msg)
+    if topic == b'device/property/reboot' and msg == b'1':
+        print("Remote reboot requested!")
+        time.sleep(1)  # give time for log to flush
+        machine.reset()
 
 def connect_and_subscribe():
     global client
     try:
         client = MQTTClient(CLIENT_ID, MQTT_BROKER, port=MQTT_PORT,
                             user=USERNAME, password=PASSWORD, ssl=True, ssl_params={})
+        client.set_callback(mqtt_callback)
         client.connect()
-        print("Connected to MQTT broker!")
+        client.subscribe(b'device/property/reboot')
+        print("Connected to MQTT broker and subscribed to reboot topic!")
         return True
     except Exception as e:
         print("Failed to connect to MQTT broker. Retrying...", str(e))
         return False
-    
+
+
 def rssi_to_percent(rssi):
     if rssi is None:
         return 0
@@ -206,9 +216,21 @@ while True:
     publish_data(lpg, co, smoke, motion, sound, panic_active)
     print("Normal data sent. Waiting for next interval or panic.")
 
+        # Check for MQTT reboot message
+    try:
+        client.check_msg()
+    except Exception as e:
+        print("MQTT check failed:", e)
+
     # --- Wait for panic or interval ---
     waited = 0
     while waited < REPORT_INTERVAL:
+        
+        try:
+            client.check_msg()  # check for remote messages while waiting
+        except Exception as e:
+            print("MQTT check failed:", e)
+
         if panic_button.value() == 0:  # Button pressed
             if not panic_active:
                 print("PANIC BUTTON PRESSED! Sending instant panic event!")
