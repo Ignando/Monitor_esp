@@ -1,5 +1,5 @@
 
-import app.config
+from app import config
 from app.ota_updater import OTAUpdater
 import app.wifimgr as wifimgr
 
@@ -14,7 +14,7 @@ print("update works!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
 
 def download_and_install_update_if_available():
     o = OTAUpdater('https://github.com/Ignando/Monitor_esp',
-                   main_dir='app', module='', secrets_file='app/config.py')  # note: app = folder name
+                   main_dir='app', module='', secrets_file=config)  # note: app = folder name
     o.install_update_if_available()
 
 download_and_install_update_if_available()
