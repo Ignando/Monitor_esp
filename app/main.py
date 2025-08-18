@@ -212,8 +212,8 @@ panic_active = False
 motion_seen = pir.value()
 
 while True:
-    client.publish("device/property/update_notice", "OTA update to version 1.13 successful")
-    print("Updated 1.0.13")
+    client.publish("device/property/update_notice", "OTA update to version 1.14 successful")
+    print("Updated 1.0.14")
     # --- Normal report ---
     rs = MQRead()
     rs_ro_ratio = rs / Ro if Ro else 0

@@ -23,6 +23,7 @@ def get_connection():
         return wlan_sta
 
     connected = False
+
     try:
         # ESP connecting to WiFi takes time, wait a bit and try again:
         time.sleep(3)
@@ -83,21 +84,26 @@ def write_profiles(profiles):
 def do_connect(ssid, password):
     wlan_sta.active(True)
     if wlan_sta.isconnected():
-        return None
+        return True
     print('Trying to connect to %s...' % ssid)
-    wlan_sta.connect(ssid, password)
-    for retry in range(200):
-        connected = wlan_sta.isconnected()
-        if connected:
-            break
-        time.sleep(0.1)
-        print('.', end='')
-    if connected:
-        print('\nConnected. Network config: ', wlan_sta.ifconfig())
-        
-    else:
-        print('\nFailed. Not Connected to: ' + ssid)
-    return connected
+
+    while True:
+        try:
+            wlan_sta.connect(ssid, password)
+        except Exception as e:
+            print("connect() error:", e)
+
+        # wait up to ~10 seconds per attempt
+        for retry in range(100):
+            if wlan_sta.isconnected():
+                print('\nConnected. Network config:', wlan_sta.ifconfig())
+                return True
+            time.sleep(0.1)
+            print('.', end='')
+
+        print('\nFailed. Retrying...')
+        # short pause before next attempt
+        time.sleep(2)
 
 
 def send_header(client, status_code=200, content_length=None ):
