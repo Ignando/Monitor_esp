@@ -209,8 +209,6 @@ Ro = MQCalibration()
 
 panic_active = False
 
-motion_seen = pir.value()
-
 while True:
     client.publish("device/property/update_notice", "OTA update to version 1.14 successful")
     print("Updated 1.0.14")
@@ -221,21 +219,20 @@ while True:
     co = MQGetGasPercentage(rs_ro_ratio, 1)
     smoke = MQGetGasPercentage(rs_ro_ratio, 2)
     sound = calculate_decibels()
+    motion = pir.value()
 
     # Handle RESET first (so you can clear panic before publishing!)
     if reset_button.value() == 0:
         if panic_active:
             print("Reset button pressed! Clearing panic state.")
             panic_active = False
-            publish_data(lpg, co, smoke, motion_seen, sound, False)
+            publish_data(lpg, co, smoke, motion, sound, False)
             # Add a small debounce delay
             time.sleep(0.5)
 
     # Send the normal payload
-    publish_data(lpg, co, smoke, motion_seen, sound, panic_active)
+    publish_data(lpg, co, smoke, motion, sound, panic_active)
     print("Normal data sent. Waiting for next interval or panic.")
-
-    motion_seen = pir.value()
 
         # Check for MQTT reboot message
     try:
@@ -252,21 +249,18 @@ while True:
         except Exception as e:
             print("MQTT check failed:", e)
 
-        if pir.value():
-            motion_seen = True
-
         if panic_button.value() == 0:  # Button pressed
             if not panic_active:
                 print("PANIC BUTTON PRESSED! Sending instant panic event!")
                 panic_active = True
-                publish_data(lpg, co, smoke, motion_seen, sound, True)
+                publish_data(lpg, co, smoke, motion, sound, True)
                 time.sleep(PANIC_DEBOUNCE)
             waited += PANIC_DEBOUNCE
         elif reset_button.value() == 0:
             if panic_active:
                 print("Reset button pressed! Clearing panic state.")
                 panic_active = False
-                publish_data(lpg, co, smoke, motion_seen, sound, False)
+                publish_data(lpg, co, smoke, motion, sound, False)
                 time.sleep(0.5)
             waited += 0.5
         else:
