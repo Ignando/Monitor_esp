@@ -4,8 +4,8 @@
 			"path": "."
 		},
 		{
-			"name": "serial:/COM4",
-			"uri": "serial://com4/"
+			"name": "serial:/dev/cu.usbserial-0001",
+			"uri": "serial:///dev/cu.usbserial-0001"
 		}
 	],
 	"settings": {}
